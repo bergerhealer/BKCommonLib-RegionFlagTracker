@@ -28,4 +28,32 @@ softdepend: [WorldGuard]
 ```
 
 ## Example Plugin
-TODO
+```java
+public class MyPlugin extends JavaPlugin {
+    public static final RegionFlag<Integer> MY_NUMBER = RegionFlag.ofInteger("my_number");
+
+    @Override
+    public void onLoad() {
+        RegionFlagRegistry.instance().register(this, MY_NUMBER);
+    }
+
+    @Override
+    public void onEnable() {
+        Bukkit.getPluginManager().registerEvents(new Listener() {
+            @EventHandler
+            public void onPlayerJoin(PlayerJoinEvent event) {
+                RegionFlagTracker<Integer> tracker = RegionFlagTracker.track(event.getPlayer(), MY_NUMBER);
+
+                tracker.getPlayer().sendMessage("Initial Value: " + tracker.getValue());
+                tracker.addListener(t -> {
+                    t.getPlayer().sendMessage("Initial Value: " + t.getValue());
+                });
+            }
+        }, this);
+    }
+
+    @Override
+    public void onDisable() {
+    }
+}
+```
