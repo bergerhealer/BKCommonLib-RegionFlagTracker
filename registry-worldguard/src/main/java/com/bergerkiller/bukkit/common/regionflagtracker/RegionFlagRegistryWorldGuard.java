@@ -94,6 +94,16 @@ class RegionFlagRegistryWorldGuard extends RegionFlagRegistryBaseImpl {
     }
 
     @Override
+    protected boolean isStateReady() {
+        return findPlugin("WorldGuard", Plugin::isEnabled) != null;
+    }
+
+    @Override
+    protected void onStateIsReady(Plugin libraryPlugin) {
+        libraryPlugin.getLogger().info("[RegionFlagTracker] Region flags will be tracked from WorldGuard");
+    }
+
+    @Override
     @SuppressWarnings("unchecked")
     protected <T> RegisteredRegionFlag<T> createNewFlag(Plugin plugin, RegionFlag<T> flag) {
         FlagMapper<?, T> mapper = (FlagMapper<?, T>) flagMappers.get(flag.type());

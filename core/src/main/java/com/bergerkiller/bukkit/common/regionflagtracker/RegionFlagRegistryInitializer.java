@@ -1,6 +1,5 @@
 package com.bergerkiller.bukkit.common.regionflagtracker;
 
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 
 /**
@@ -9,7 +8,7 @@ import org.bukkit.plugin.Plugin;
 class RegionFlagRegistryInitializer {
 
     public static RegionFlagRegistryBaseImpl initialize() {
-        Plugin worldguardPlugin = findPluginEnabledOrProvided("WorldGuard");
+        Plugin worldguardPlugin = RegionFlagRegistryBaseImpl.findPlugin("WorldGuard", p -> true);
         if (worldguardPlugin != null) {
             boolean available = false;
             try {
@@ -27,29 +26,5 @@ class RegionFlagRegistryInitializer {
         }
 
         return new RegionFlagRegistryDisabled();
-    }
-
-    private static Plugin findPluginEnabledOrProvided(String pluginName) {
-        // The plugin itself
-        {
-            Plugin p = Bukkit.getPluginManager().getPlugin(pluginName);
-            if (p != null) {
-                return p;
-            }
-        }
-
-        // Plugins that substitute the plugin (provides)
-        try {
-            for (Plugin p : Bukkit.getPluginManager().getPlugins()) {
-                for (String provide : p.getDescription().getProvides()) {
-                    if (pluginName.equalsIgnoreCase(provide)) {
-                        return p;
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            /* Ignore - probably missing provides api */
-        }
-        return null;
     }
 }
