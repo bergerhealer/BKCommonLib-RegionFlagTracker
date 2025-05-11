@@ -21,6 +21,23 @@ public final class RegionFlagTracker<T> {
     private List<ChangeListener<T>> listeners = Collections.emptyList();
     private T value = null;
 
+    /**
+     * Retrieves the per-player RegionFlag value tracker. The value is automatically kept
+     * up to date when the player moves between regions.<br>
+     * <br>
+     * If the input player has left the server (is invalid), then this method will return
+     * a fallback tracker with value always absent. The tracker will not reflect the true
+     * value when the player goes back online.
+     *
+     * @param player Player to track. Must be of a valid online Player for tracking to work.
+     * @param flag RegionFlag to track. Must be registered or an error is thrown.
+     * @return RegionFlagTracker object
+     * @param <T> Flag value type
+     */
+    public static <T> RegionFlagTracker<T> track(Player player, RegionFlag<T> flag) {
+        return RegionFlagRegistry.instance().track(player, flag);
+    }
+
     RegionFlagTracker(Plugin plugin, Player player, RegionFlag<T> flag) {
         this.plugin = plugin;
         this.player = player;

@@ -1,5 +1,8 @@
 package com.bergerkiller.bukkit.common.regionflagtracker;
 
+import com.bergerkiller.bukkit.common.regionflagtracker.worldguard.WGRegionFlagsChangeTracker;
+import com.bergerkiller.bukkit.common.regionflagtracker.worldguard.WGRegionFlagsChangeTrackerFallback;
+import com.bergerkiller.bukkit.common.regionflagtracker.worldguard.WGRegionFlagsChangeTrackerFieldHack;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.util.Location;
 import com.sk89q.worldguard.LocalPlayer;
@@ -12,22 +15,35 @@ import com.sk89q.worldguard.protection.flags.IntegerFlag;
 import com.sk89q.worldguard.protection.flags.StateFlag;
 import com.sk89q.worldguard.protection.flags.StringFlag;
 import com.sk89q.worldguard.protection.flags.registry.FlagRegistry;
+import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.session.MoveType;
 import com.sk89q.worldguard.session.Session;
 import com.sk89q.worldguard.session.SessionManager;
 import com.sk89q.worldguard.session.handler.FlagValueChangeHandler;
 import com.sk89q.worldguard.session.handler.Handler;
+import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 
+import java.util.Collections;
 import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Level;
 
 /**
  * Makes use of WorldGuard's session flag tracking logic to refresh the region-flag values.
+ * Does a lot of extra logic, like keeping track of when the flags of regions (that players are in)
+ * change and if so to refresh the flag query. It's all quite complicated because WorldGuard
+ * sucks.
  */
 class RegionFlagRegistryWorldGuard extends RegionFlagRegistryBaseImpl {
+    private Plugin libraryPlugin = null;
     private final Map<RegionFlag.Type, FlagMapper<?, ?>> flagMappers = new EnumMap<>(RegionFlag.Type.class);
+    private final Map<ProtectedRegion, TrackedProtectedRegion> trackedRegions = new IdentityHashMap<>();
 
     public RegionFlagRegistryWorldGuard() {
         flagMappers.put(RegionFlag.Type.BOOLEAN, new UnaryFlagMapper<Boolean>() {
@@ -99,8 +115,42 @@ class RegionFlagRegistryWorldGuard extends RegionFlagRegistryBaseImpl {
     }
 
     @Override
-    protected void onStateIsReady(Plugin libraryPlugin) {
+    protected void onStateIsReady(final Plugin libraryPlugin) {
+        Bukkit.getScheduler().scheduleSyncRepeatingTask(libraryPlugin, this::updateTrackedRegions, 1L, 1L);
         libraryPlugin.getLogger().info("[RegionFlagTracker] Region flags will be tracked from WorldGuard");
+    }
+
+    @Override
+    public synchronized void enable(Plugin libraryPlugin) {
+        this.libraryPlugin = libraryPlugin;
+        super.enable(libraryPlugin);
+    }
+
+    @Override
+    public synchronized void disable() {
+        super.disable();
+        trackedRegions.clear();
+    }
+
+    private void updateTrackedRegions() {
+        Set<ValueTrackerHandler<?, ?>> changedHandlers = Collections.emptySet();
+        final Iterator<TrackedProtectedRegion> iter = this.trackedRegions.values().iterator();
+        while (iter.hasNext()) {
+            final TrackedProtectedRegion.UpdateResult result = iter.next().update();
+            if (result.cleanupRegion) {
+                iter.remove();
+            }
+            else {
+                if (result.handlersToRefresh.isEmpty()) {
+                    continue;
+                }
+                if (changedHandlers.isEmpty()) {
+                    changedHandlers = new HashSet<ValueTrackerHandler<?, ?>>();
+                }
+                changedHandlers.addAll(result.handlersToRefresh);
+            }
+        }
+        changedHandlers.forEach(ValueTrackerHandler::refresh);
     }
 
     @Override
@@ -142,6 +192,17 @@ class RegionFlagRegistryWorldGuard extends RegionFlagRegistryBaseImpl {
         Flag<R> worldguardFlag = mapper.create(flag.name());
         registry.register(worldguardFlag); // Can throw!
         return worldguardFlag;
+    }
+
+    private Optional<TrackedProtectedRegion> trackRegionIfExists(final ProtectedRegion region) {
+        return Optional.ofNullable(this.trackedRegions.get(region));
+    }
+
+    private TrackedProtectedRegion trackRegion(final ProtectedRegion region) {
+        if (libraryPlugin == null) {
+            throw new IllegalStateException("Region tracking begun before enable()");
+        }
+        return this.trackedRegions.computeIfAbsent(region, r -> new TrackedProtectedRegion(libraryPlugin, region));
     }
 
     /**
@@ -207,42 +268,146 @@ class RegionFlagRegistryWorldGuard extends RegionFlagRegistryBaseImpl {
         }
     }
 
-    private static class ValueTrackerHandler<T, R> extends FlagValueChangeHandler<R> {
+    private static class ValueTrackerHandler<T, R> extends Handler {
         private final RegisteredWorldGuardRegionFlag<T, R> flag;
-        private RegionFlagTracker<T> tracker = null; // Initialized on first callback
+        private LocalPlayer lastLocalPlayer;
+        private RegionFlagTracker<T> tracker;
+        private ApplicableRegionSet currentRegionSet;
+        private R lastValue;
 
-        protected ValueTrackerHandler(Session session, RegisteredWorldGuardRegionFlag<T, R> flag) {
-            super(session, flag.worldguardFlag);
+        protected ValueTrackerHandler(final Session session, final RegisteredWorldGuardRegionFlag<T, R> flag) {
+            super(session);
+            this.lastLocalPlayer = null;
+            this.tracker = null;
+            this.currentRegionSet = null;
             this.flag = flag;
         }
 
-        private RegionFlagTracker<T> getTracker(LocalPlayer localPlayer) {
-            RegionFlagTracker<T> tracker;
-            if ((tracker = this.tracker) == null) {
-                this.tracker = tracker = flag.registry.track(BukkitAdapter.adapt(localPlayer), flag.flag);
+        private void updateTracker(final LocalPlayer player) {
+            if (this.lastLocalPlayer != player) {
+                this.lastLocalPlayer = player;
+                this.tracker = this.flag.registry.track(BukkitAdapter.adapt(player), this.flag.flag);
             }
-            return tracker;
         }
 
         @Override
-        protected void onInitialValue(LocalPlayer localPlayer, ApplicableRegionSet applicableRegionSet, R t) {
-            if (t == null) {
-                getTracker(localPlayer).updateValue(null);
+        public void initialize(LocalPlayer player, Location current, ApplicableRegionSet set) {
+            R currentValue = set.queryValue(player, flag.worldguardFlag);
+            this.lastValue = currentValue;
+            if (this.currentRegionSet != null) {
+                for (final ProtectedRegion region : this.currentRegionSet) {
+                    this.flag.registry.trackRegionIfExists(region).ifPresent(tr -> tr.handlers.remove(this));
+                }
+            }
+            this.currentRegionSet = set;
+            this.updateTracker(player);
+            for (final ProtectedRegion region : set) {
+                this.flag.registry.trackRegion(region).handlers.add(this);
+            }
+
+            if (currentValue == null) {
+                this.tracker.updateValue(null);
             } else {
-                getTracker(localPlayer).updateValue(flag.mapper.marshalValue(t));
+                this.tracker.updateValue(this.flag.mapper.marshalValue(currentValue));
             }
         }
 
         @Override
-        protected boolean onSetValue(LocalPlayer localPlayer, Location location, Location location1, ApplicableRegionSet applicableRegionSet, R t, R t1, MoveType moveType) {
-            getTracker(localPlayer).updateValue(flag.mapper.marshalValue(t));
+        public boolean onCrossBoundary(final LocalPlayer player, final Location from, final Location to, final ApplicableRegionSet toSet, final Set<ProtectedRegion> entered, final Set<ProtectedRegion> exited, final MoveType moveType) {
+            if (entered.isEmpty() && exited.isEmpty()
+                    && from.getExtent().equals(to.getExtent())) { // sets don't include global regions - check if those changed
+                return true; // no changes to flags if regions didn't change
+            }
+
+            this.currentRegionSet = toSet;
+            this.updateTracker(player);
+            for (final ProtectedRegion region : exited) {
+                this.flag.registry.trackRegionIfExists(region).ifPresent(tr -> tr.handlers.remove(this));
+            }
+            for (final ProtectedRegion region : entered) {
+                this.flag.registry.trackRegion(region).handlers.add(this);
+            }
+
+            updateValue(toSet.queryValue(player, flag.worldguardFlag));
             return true;
         }
 
-        @Override
-        protected boolean onAbsentValue(LocalPlayer localPlayer, Location location, Location location1, ApplicableRegionSet applicableRegionSet, R t, MoveType moveType) {
-            getTracker(localPlayer).updateValue(null);
-            return true;
+        public void refresh() {
+            if (this.lastLocalPlayer == null || this.tracker == null || this.currentRegionSet == null) {
+                return;
+            }
+
+            updateValue(this.currentRegionSet.queryValue(this.lastLocalPlayer, this.flag.worldguardFlag));
+        }
+
+        private void updateValue(R currentValue) {
+            if (currentValue == null && lastValue != null) {
+                this.tracker.updateValue(null);
+            } else if (currentValue != null && currentValue != lastValue) {
+                this.tracker.updateValue(this.flag.mapper.marshalValue(currentValue));
+            }
+            lastValue = currentValue;
+        }
+    }
+
+    private static final class TrackedProtectedRegion {
+        private static boolean IS_OPTIMIZED_FLAG_TRACKER_WORKING = true;
+        public final ProtectedRegion region;
+        public final Set<ValueTrackerHandler<?, ?>> handlers;
+        private WGRegionFlagsChangeTracker flagChangeTracker;
+        private int checkPlayersQuitCounter = 0;
+
+        public TrackedProtectedRegion(Plugin libraryPlugin, ProtectedRegion region) {
+            this.handlers = new HashSet<>();
+            this.region = region;
+            this.flagChangeTracker = initFlagChangeTracker(libraryPlugin, region);
+        }
+
+        private static WGRegionFlagsChangeTracker initFlagChangeTracker(Plugin libraryPlugin, ProtectedRegion region) {
+            if (IS_OPTIMIZED_FLAG_TRACKER_WORKING) {
+                try {
+                    return new WGRegionFlagsChangeTrackerFieldHack(region);
+                } catch (WGRegionFlagsChangeTrackerFieldHack.OptimizationNotSupportedException ex) {
+                    IS_OPTIMIZED_FLAG_TRACKER_WORKING = false;
+                    libraryPlugin.getLogger().log(Level.WARNING, "[RegionFlagTracker] Could not optimize detection of region flag changes", ex);
+                }
+            }
+            return new WGRegionFlagsChangeTrackerFallback(region);
+        }
+
+        public UpdateResult update() {
+            // Every 40 ticks verify for all the trackers we got whether the player is still online
+            // When players log off, this is currently the only way to check for it unfortunately
+            if (++checkPlayersQuitCounter >= 40) {
+                checkPlayersQuitCounter = 0;
+                this.handlers.removeIf(handler -> handler.tracker != null && RegionFlagRegistry.hasPlayerQuit(handler.tracker.getPlayer()));
+            }
+
+            if (this.handlers.isEmpty()) {
+                return UpdateResult.DEFAULT_CLEANUP;
+            } else if (flagChangeTracker.update(region)) {
+                return new UpdateResult(false, this.handlers);
+            } else {
+                return UpdateResult.DEFAULT_KEEP;
+            }
+        }
+
+        private static class UpdateResult
+        {
+            public static final UpdateResult DEFAULT_CLEANUP;
+            public static final UpdateResult DEFAULT_KEEP;
+            public final boolean cleanupRegion;
+            public final Set<ValueTrackerHandler<?, ?>> handlersToRefresh;
+
+            public UpdateResult(final boolean cleanupRegion, final Set<ValueTrackerHandler<?, ?>> handlersToRefresh) {
+                this.cleanupRegion = cleanupRegion;
+                this.handlersToRefresh = handlersToRefresh;
+            }
+
+            static {
+                DEFAULT_CLEANUP = new UpdateResult(true, Collections.emptySet());
+                DEFAULT_KEEP = new UpdateResult(false, Collections.emptySet());
+            }
         }
     }
 }

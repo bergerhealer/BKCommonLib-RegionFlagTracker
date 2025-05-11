@@ -3,18 +3,24 @@ package com.bergerkiller.bukkit.common.regionflagtracker;
 import org.bukkit.plugin.Plugin;
 
 /**
- * A singular flag that can be set on a region. When players move in and out of the
- * region the tracker notifies the plugin of the region flag changing.
- * In addition, the {@link RegionFlagTracker} can be obtained for a Player for this
- * flag to quickly get the current flag value without relying on events.<br>
- * <br>
- * Before the region flag is used, it must be registered with
- * {@link RegionFlagRegistry#register(Plugin, RegionFlag)} inside your plugin
- * {@link Plugin#onLoad()}. The registry has a static instance getter.<br>
- * <br>
- * Please note that in internal logic, it uses identity equality to check whether
- * flags are the same. Not flag name or type. In normal use you would create a static
- * RegionFlag constant somewhere in your plugin and refer to that in your own code.
+ * A singular flag that can be set on a region in WorldGuard, if enabled. Before the
+ * region flag is used, it must be registered with {@link RegionFlagRegistry#register(Plugin, RegionFlag)}
+ * inside your {@link Plugin#onLoad()}, like so:
+ * <pre>
+ * public static final RegionFlag&lt;Integer&gt; MY_NUMBER =
+ *         RegionFlag.ofInteger("mynumber");
+ *
+ *{@literal @Override}
+ * public void onLoad() {
+ *     RegionFlagRegistry.instance().register(this,
+ *             MY_NUMBER);
+ * }
+ * </pre>
+ *
+ * Afterwards, at any time, the {@link RegionFlagTracker} can be obtained for a Player for this
+ * flag. The tracker has a
+ * {@link RegionFlagTracker#addListener(RegionFlagTracker.ChangeListener) listener API} to
+ * automatically receive value changes of this flag.
  *
  * @param <T> Value type of the region flag
  */

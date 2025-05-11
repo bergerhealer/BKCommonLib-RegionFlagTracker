@@ -18,14 +18,14 @@ public abstract class RegionFlagRegistry {
     protected final Map<PlayerFlagKey, RegionFlagTracker<?>> trackers = new HashMap<>();
 
     // Detected during onLoad(), as we need to register flags into that API before enable() occurs
-    private static RegionFlagRegistry instance = initRegistryInstance();
+    private static final RegionFlagRegistry instance = initRegistryInstance();
 
     /**
      * Gets the region flag registry singleton instance of the server.
      *
      * @return RegionFlagRegistry
      */
-    public static RegionFlagRegistry getInstance() {
+    public static RegionFlagRegistry instance() {
         return instance;
     }
 
@@ -81,7 +81,7 @@ public abstract class RegionFlagRegistry {
     public synchronized <T> RegionFlagTracker<T> track(Player player, RegionFlag<T> flag) {
         // If the player instance is invalid, return a detached tracker with an empty value
         // We don't want to cause any weird memory leaks
-        if (!player.isValid() && Bukkit.getPlayer(player.getUniqueId()) != player) {
+        if (hasPlayerQuit(player)) {
             RegionFlagTracker<T> existing = (RegionFlagTracker<T>) trackers.get(new PlayerFlagKey(player, flag));
             return existing != null ? existing : new RegionFlagTracker<>(getFlagOwnerVerify(flag), player, flag);
         }
@@ -180,5 +180,9 @@ public abstract class RegionFlagRegistry {
         public String toString() {
             return "{player=" + player.getName() + ", flag=" + this.flag + "}";
         }
+    }
+
+    static boolean hasPlayerQuit(final Player player) {
+        return !player.isValid() && Bukkit.getPlayer(player.getUniqueId()) != player;
     }
 }

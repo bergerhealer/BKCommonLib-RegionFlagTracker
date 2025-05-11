@@ -27,13 +27,13 @@ public abstract class RegionFlagRegistryBaseImpl extends RegionFlagRegistry {
     private boolean ready = false;
 
     /**
-     * Same as {@link RegionFlagRegistry#getInstance()} but as the implementation base type
+     * Same as {@link RegionFlagRegistry#instance()} but as the implementation base type
      * for calling enable/disable on. To be used by the library-owning plugin.
      *
      * @return RegionFlagRegistryBaseImpl
      */
-    public static RegionFlagRegistryBaseImpl getInstance() {
-        return (RegionFlagRegistryBaseImpl) RegionFlagRegistry.getInstance();
+    public static RegionFlagRegistryBaseImpl instance() {
+        return (RegionFlagRegistryBaseImpl) RegionFlagRegistry.instance();
     }
 
     /**
@@ -92,7 +92,7 @@ public abstract class RegionFlagRegistryBaseImpl extends RegionFlagRegistry {
                         }
                     }
 
-                    // Disable any change handler we had registered for it
+                    // Disable any change handlers we had registered for it
                     handlersToUnregister.forEach(RegisteredRegionFlag::unregisterHandler);
                 }
             }
