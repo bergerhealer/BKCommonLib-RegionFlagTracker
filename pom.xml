@@ -1,0 +1,96 @@
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.bergerkiller.bukkit.regionflagtracker</groupId>
+    <artifactId>BKCommonLib-RegionFlagTracker</artifactId>
+    <version>${revision}</version>
+    <name>BKCommonLib-RegionFlagTracker</name>
+    <packaging>pom</packaging>
+
+    <properties>
+        <revision>1.0-SNAPSHOT</revision>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.build.number>NO-CI</project.build.number>
+        <project.maven-compiler.version>2.3.2</project.maven-compiler.version>
+        <project.serverversion>1.16.1-R0.1</project.serverversion>
+    </properties>
+
+    <repositories>
+        <!-- Repo for access to CraftBukkit -->
+        <repository>
+          <id>spigot-repo</id>
+          <url>https://hub.spigotmc.org/nexus/content/groups/public/</url>
+        </repository>
+
+        <!-- Repo for access to misc. dependencies -->
+        <repository>
+            <id>MG-Dev Jenkins CI Maven Repository</id>
+            <url>https://ci.mg-dev.eu/plugin/repository/everything</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.spigotmc</groupId>
+            <artifactId>spigot-api</artifactId>
+            <version>${project.serverversion}-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>3.8.1</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <modules>
+        <module>api</module>
+        <module>core</module>
+        <module>registry-base</module>
+        <module>registry-worldguard</module>
+    </modules>
+
+    <build>
+        <defaultGoal>clean install</defaultGoal>
+
+        <!-- Flatten plugin ensures the stored pom.xml has variables resolved -->
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.1.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- For deploying on https://ci.mg-dev.eu/plugin/repository/ -->
+    <distributionManagement>
+        <repository>
+            <id>mg-dev-repo</id>
+            <name>ci.mg-dev.eu repository</name>
+            <url>https://ci.mg-dev.eu/plugin/repository/everything</url>
+        </repository>
+    </distributionManagement>
+</project>
